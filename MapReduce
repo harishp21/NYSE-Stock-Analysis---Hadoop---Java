@@ -1,0 +1,132 @@
+//StockPercentChangeMapper:
+
+import java.io.IOException;
+import org.apache.hadoop.io.FloatWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+public class StockPercentChangeMapper extends
+		Mapper<LongWritable, Text, Text, FloatWritable> {
+	Text stock_sym = new Text();
+	FloatWritable percent = new FloatWritable();
+
+	@Override
+	public void map(LongWritable key, Text value, Context context)
+			throws IOException, InterruptedException {
+		try {
+			String[] line = value.toString().split(",");
+			// String[] inputData = line.split(",");
+			String stock_symbol = line[1];
+			float high_val = Float.valueOf(line[4]);
+			float low_val = Float.valueOf(line[5]);
+			float percent_change = ((high_val - low_val) * 100) / low_val;
+			stock_sym.set(stock_symbol);
+			percent.set(percent_change);
+			context.write(stock_sym, percent);
+		} catch (IndexOutOfBoundsException e) {
+		} catch (ArithmeticException e1) {
+		}
+	}
+}
+
+//StockPercentChangeReducer:
+
+import java.io.IOException;
+import org.apache.hadoop.io.FloatWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+public class StockPercentChangeReducer extends
+		Reducer<Text, FloatWritable, Text, FloatWritable> {
+	FloatWritable max_val = new FloatWritable();
+	
+	@Override
+	public void reduce(Text key, Iterable<FloatWritable> values, Context context)
+			throws IOException, InterruptedException {
+		float max_percent_val=0;
+		float temp_val=0;
+		for (FloatWritable value : values) {
+			temp_val = value.get();
+			if (temp_val > max_percent_val) {
+				max_percent_val = temp_val;
+			}
+		}
+		max_val.set(max_percent_val);
+		context.write(key, max_val);
+	}
+}
+
+NYSEPartitioner:
+
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.io.FloatWritable;
+import org.apache.hadoop.mapreduce.Partitioner;
+
+public class NYSEPartitioner<K2, V2> extends Partitioner<Text,FloatWritable> {
+	public int getPartition(Text key, FloatWritable value, int numReduceTasks) {
+		return(key.toString().charAt(0)-65);
+				
+	}
+}
+
+StockPercentChangeDriver:
+
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.FloatWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.mapreduce.Job;
+
+public class StockPercentChangeDriver {
+
+	public static void main(String[] args) throws Exception {
+
+		/*
+		 * Validate that two arguments were passed from the command line.
+		 */
+		if (args.length != 2) {
+			System.out
+					.printf("Usage: StockPercentChangeDriver <input dir> <output dir>\n");
+			System.exit(-1);
+		}
+
+		/*
+		 * Instantiate a Job object for your job's configuration.
+		 */
+		Job job = new Job();
+
+		/*
+		 * Specify the jar file that contains your driver, mapper, and reducer.
+		 * Hadoop will transfer this jar file to nodes in your cluster running
+		 * mapper and reducer tasks.
+		 */
+		job.setJarByClass(StockPercentChangeDriver.class);
+
+		/*
+		 * Specify an easily-decipherable name for the job. This job name will
+		 * appear in reports and logs.
+		 */
+		job.setJobName("StockPercentageChange");
+
+		FileInputFormat.setInputPaths(job, new Path(args[0]));
+		FileOutputFormat.setOutputPath(job, new Path(args[1]));
+		
+		job.setMapperClass(StockPercentChangeMapper.class);
+		job.setReducerClass(StockPercentChangeReducer.class);
+		job.setPartitionerClass(NYSEPartitioner.class);
+		
+		job.setNumReduceTasks(26);
+		
+		job.setOutputKeyClass(Text.class);
+		job.setOutputValueClass(FloatWritable.class);
+
+		/*
+		 * Start the MapReduce job and wait for it to finish. If it finishes
+		 * successfully, return 0. If not, return 1.
+		 */
+		boolean success = job.waitForCompletion(true);
+		System.exit(success ? 0 : 1);
+	}
+}
